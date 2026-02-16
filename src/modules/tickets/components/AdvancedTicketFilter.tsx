@@ -1,0 +1,292 @@
+import React, { useEffect, useState } from 'react';
+import { useForm, Controller } from 'react-hook-form';
+import type { TicketFilter } from '../interfaces/Ticket';
+import { Button } from '../../../shared/components/Button';
+import { Select } from '../../../shared/components/Select';
+import { UserSelect } from '../../users/components/UserSelect';
+import { companyService } from '../services/company.service';
+import { subcategoryService } from '../services/subcategory.service';
+import { tagService } from '../services/tag.service';
+
+interface AdvancedTicketFilterProps {
+    filters: TicketFilter;
+    onFilterChange: (filters: TicketFilter) => void;
+    onClear: () => void;
+}
+
+interface FilterFormValues {
+    companyId?: number;
+    subcategoryId?: number;
+    tagId?: number;
+    ticketId?: number;
+    dateFrom?: string;
+    dateTo?: string;
+    creatorId?: number;
+    assigneeId?: number;
+    messageSearch?: string;
+}
+
+export const AdvancedTicketFilter: React.FC<AdvancedTicketFilterProps> = ({ filters, onFilterChange, onClear }) => {
+    const { control, register, handleSubmit, reset, watch } = useForm<FilterFormValues>({
+        defaultValues: {
+            companyId: filters.companyId,
+            subcategoryId: filters.subcategoryId,
+            tagId: filters.tagId,
+            messageSearch: filters.messageSearch,
+            dateFrom: filters.dateFrom,
+            dateTo: filters.dateTo
+        }
+    });
+
+    const [isExpanded, setIsExpanded] = useState(false);
+    const [companies, setCompanies] = useState<{ id: number; nombre: string }[]>([]);
+    const [subcategories, setSubcategories] = useState<{ id: number; nombre: string }[]>([]);
+    const [tags, setTags] = useState<{ id: number; nombre: string; color: string }[]>([]);
+
+    // Load initial data
+    useEffect(() => {
+        const loadData = async () => {
+            try {
+                // Fetch basic lists
+                const [loadedTags, loadedCompanies] = await Promise.all([
+                    tagService.getMyTags(),
+                    companyService.getCompanies()
+                ]);
+
+                setTags(loadedTags);
+                setCompanies(loadedCompanies);
+            } catch (err) {
+                console.error("Error loading filter data", err);
+            }
+        };
+        loadData();
+    }, []);
+
+    const [isTrackerEnabled, setIsTrackerEnabled] = useState(false);
+
+    // Load subcategories when company changes OR tracker is toggled
+    const selectedCompanyId = watch('companyId');
+    useEffect(() => {
+        const loadSubcats = async () => {
+            try {
+                let subs: { id: number; nombre: string }[] = [];
+                if (isTrackerEnabled) {
+                    subs = await subcategoryService.getTrackRecord();
+                } else if (selectedCompanyId) {
+                    subs = await subcategoryService.getByCompany(selectedCompanyId);
+                }
+                setSubcategories(subs);
+            } catch (e) { console.error(e); }
+        };
+        loadSubcats();
+    }, [selectedCompanyId, isTrackerEnabled]);
+
+    const onSubmit = (data: FilterFormValues) => {
+        onFilterChange({
+            ...filters,
+            ...data,
+            page: 1 // Reset page on filter
+        });
+    };
+
+    const handleClear = () => {
+        reset({
+            companyId: undefined,
+            subcategoryId: undefined,
+            tagId: undefined,
+            creatorId: undefined,
+            assigneeId: undefined,
+            messageSearch: '',
+            dateFrom: '',
+            dateTo: ''
+        });
+        setIsTrackerEnabled(false);
+        onClear();
+    };
+
+    return (
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-6">
+            <div className="flex justify-between items-center mb-4 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
+                <h3 className="text-sm font-semibold text-gray-700 flex items-center">
+                    <span className="material-symbols-outlined mr-2">filter_list</span>
+                    Filtros Avanzados
+                </h3>
+                <span className="material-symbols-outlined text-gray-500">
+                    {isExpanded ? 'expand_less' : 'expand_more'}
+                </span>
+            </div>
+
+            {isExpanded && (
+                <form onSubmit={handleSubmit(onSubmit)}>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                        {/* Empresa */}
+                        <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Empresa</label>
+                            <Controller
+                                name="companyId"
+                                control={control}
+                                render={({ field }) => (
+                                    <Select
+                                        {...field}
+                                        label="Empresa"
+                                        placeholder="Todas"
+                                        options={companies.map(c => ({ value: c.id, label: c.nombre }))}
+                                        value={field.value || ''}
+                                        onChange={(val) => {
+                                            field.onChange(val);
+                                            // Disable tracker if company is manually selected
+                                            if (val) setIsTrackerEnabled(false);
+                                        }}
+                                        disabled={isTrackerEnabled}
+                                    />
+                                )}
+                            />
+                        </div>
+
+                        {/* Subcategoria */}
+                        <div>
+                            <div className="flex justify-between items-center mb-1">
+                                <label className="block text-xs font-medium text-gray-700">Subcategoría</label>
+                                <label className="flex items-center space-x-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={isTrackerEnabled}
+                                        onChange={(e) => {
+                                            setIsTrackerEnabled(e.target.checked);
+                                            if (e.target.checked) {
+                                                // Clear company if tracker is enabled
+                                                // setValue('companyId', undefined); // Optional: clear company
+                                            }
+                                        }}
+                                        className="h-3 w-3 rounded border-gray-300 text-brand-teal focus:ring-brand-teal"
+                                    />
+                                    <span className="text-[10px] text-gray-500 font-medium">Solo mis procesos</span>
+                                </label>
+                            </div>
+                            <Controller
+                                name="subcategoryId"
+                                control={control}
+                                render={({ field }) => (
+                                    <Select
+                                        {...field}
+                                        label="Subcategoría"
+                                        placeholder={isTrackerEnabled ? "Selecciona de tu historial..." : "Todas"}
+                                        options={subcategories.map(s => ({ value: s.id, label: s.nombre }))}
+                                        value={field.value || ''}
+                                        onChange={(val) => field.onChange(val)}
+                                    />
+                                )}
+                            />
+                        </div>
+
+                        {/* Etiqueta */}
+                        <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Etiqueta</label>
+                            <Controller
+                                name="tagId"
+                                control={control}
+                                render={({ field }) => (
+                                    <Select
+                                        {...field}
+                                        label="Etiqueta"
+                                        placeholder="Todas"
+                                        options={tags.map(t => ({ value: t.id, label: t.nombre }))}
+                                        value={field.value || ''}
+                                        onChange={(val) => field.onChange(val)}
+                                    />
+                                )}
+                            />
+                        </div>
+
+                        {/* N Ticket */}
+                        <div className="flex flex-col justify-end">
+                            <label className="block text-xs font-medium text-gray-700 mb-1">N° Ticket</label>
+                            <input
+                                type="number"
+                                placeholder="ID"
+                                {...register('ticketId', { valueAsNumber: true })}
+                                className="block w-full h-[40px] px-4 rounded-lg border-gray-200 bg-white text-sm font-medium text-gray-900 placeholder-gray-500 focus:border-brand-teal focus:ring-brand-teal"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                        {/* Fecha Inicio */}
+                        <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Fecha Inicio</label>
+                            <input
+                                type="date"
+                                {...register('dateFrom')}
+                                className="block w-full rounded-lg border-gray-200 bg-white py-2.5 px-4 text-sm font-medium text-gray-900 focus:border-brand-teal focus:ring-brand-teal"
+                            />
+                        </div>
+
+                        {/* Fecha Fin */}
+                        <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Fecha Fin</label>
+                            <input
+                                type="date"
+                                {...register('dateTo')}
+                                className="block w-full rounded-lg border-gray-200 bg-white py-2.5 px-4 text-sm font-medium text-gray-900 focus:border-brand-teal focus:ring-brand-teal"
+                            />
+                        </div>
+
+                        {/* Usuario Creador */}
+                        <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Creador</label>
+                            <Controller
+                                name="creatorId"
+                                control={control}
+                                render={({ field }) => (
+                                    <UserSelect
+                                        value={field.value}
+                                        onChange={(val) => field.onChange(val)}
+                                        placeholder="Buscar creador..."
+                                    />
+                                )}
+                            />
+                        </div>
+
+                        {/* Asignado A */}
+                        <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Asignado A</label>
+                            <Controller
+                                name="assigneeId"
+                                control={control}
+                                render={({ field }) => (
+                                    <UserSelect
+                                        value={field.value}
+                                        onChange={(val) => field.onChange(val)}
+                                        placeholder="Buscar asignado..."
+                                    />
+                                )}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Busqueda Mensajes (Full Width) */}
+                    <div className="mb-4">
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Búsqueda en Mensajes</label>
+                        <div className="flex relative">
+                            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                                <span className="material-symbols-outlined text-gray-400">search</span>
+                            </div>
+                            <input
+                                type="text"
+                                placeholder="Buscar texto en historial de mensajes..."
+                                {...register('messageSearch')}
+                                className="block w-full rounded-l-lg border-gray-200 bg-gray-50 py-2.5 pl-10 pr-4 text-sm font-medium text-gray-900 placeholder-gray-500 focus:border-brand-teal focus:bg-white focus:ring-brand-teal"
+                            />
+                            <Button type="submit" variant="brand" className="rounded-l-none rounded-r-lg">
+                                Buscar
+                            </Button>
+                            <Button type="button" variant="outline" onClick={handleClear} className="ml-2 rounded-lg">
+                                <span className="material-symbols-outlined">filter_alt_off</span>
+                            </Button>
+                        </div>
+                    </div>
+                </form>
+            )}
+        </div>
+    );
+};
